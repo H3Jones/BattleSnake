@@ -234,7 +234,11 @@ async fn main() {
         rooms: Arc::new(Mutex::new(HashMap::new())),
         config: Config::default(),
     };
-    let app = Router::new().route("/ws", get(websocket)).with_state(state);
+    let web_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../web");
+    let app = Router::new()
+        .route("/ws", get(websocket))
+        .fallback_service(tower_http::services::ServeDir::new(web_dir))
+        .with_state(state);
     let listener = TcpListener::bind(address).await.expect("failed to bind");
     println!("BattleSnake server listening on ws://{address}/ws");
     axum::serve(listener, app).await.expect("server failed");

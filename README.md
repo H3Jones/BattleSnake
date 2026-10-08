@@ -3,7 +3,8 @@
 BattleSnake is a small two-player game combining Battleships-style hidden shots
 with snake movement. It is a Cargo workspace with a deterministic Rust rules
 engine, JSON WebSocket protocol, authoritative server, and a minimal terminal
-client. The `web/` directory is reserved for a future browser client.
+client. The `web/` directory holds a static browser client served by the
+server at `/` (open `http://127.0.0.1:7777`).
 
 ## Rules and architecture
 

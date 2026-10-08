@@ -1,0 +1,12 @@
+body { font-family: sans-serif; background: #111; color: #eee; margin: 1rem; }
+#boards { display: flex; gap: 2rem; flex-wrap: wrap; }
+.board { display: grid; gap: 1px; background: #333; width: max-content; }
+.cell { width: 32px; height: 32px; background: #1c3a5a; display: flex;
+  align-items: center; justify-content: center; font-size: 14px; }
+#enemy .cell { cursor: pointer; }
+.cell.body { background: #3a9d4a; }
+.cell.head { background: #7ddc6a; }
+.cell.shot { background: #7a2a2a; }
+.cell.miss { background: #2b2b2b; }
+.cell.sever { background: #b8561a; }
+.cell.target { outline: 2px solid #ffd54a; outline-offset: -2px; }

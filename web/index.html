@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BattleSnake</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>BattleSnake</h1>
+<form id="join">
+  <input id="room" placeholder="Room code (blank = new)" autocomplete="off">
+  <input id="name" placeholder="Name" value="Player" autocomplete="off">
+  <button>Join</button>
+</form>
+<div id="controls" hidden>
+  <button id="ready">Ready</button>
+  <button id="resign">Resign</button>
+  <span>Steer: WASD / arrows &middot; Click enemy board to aim &middot; Enter fire &middot; Space move only</span>
+</div>
+<p id="status">Not connected.</p>
+<div id="boards">
+  <section><h2>Your board</h2><div id="own" class="board"></div></section>
+  <section><h2>Enemy (fog of war)</h2><div id="enemy" class="board"></div></section>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
