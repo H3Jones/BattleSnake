@@ -1,0 +1,9 @@
+[package]
+name = "battlesnake-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+battlesnake-core = { path = "../core" }
+serde.workspace = true
