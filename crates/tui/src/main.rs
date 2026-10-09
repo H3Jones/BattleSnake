@@ -46,7 +46,8 @@ impl Default for Ui {
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let vs_bot = args.iter().any(|arg| arg == "--bot");
-    args.retain(|arg| arg != "--bot");
+    let spectating = args.iter().any(|arg| arg == "--spectate");
+    args.retain(|arg| arg != "--bot" && arg != "--spectate");
     let mut args = args.into_iter();
     let address = args
         .next()
@@ -57,7 +58,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (mut writer, mut reader) = socket.split();
     writer
         .send(Message::Text(
-            serde_json::to_string(&ClientMessage::Join { room, name, vs_bot })?.into(),
+            serde_json::to_string(&ClientMessage::Join {
+                room,
+                name,
+                vs_bot,
+                bot_vs_bot: spectating,
+            })?
+            .into(),
         ))
         .await?;
 
@@ -98,8 +105,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         ui.status = "Game started.".into();
                     }
                     Ok(ServerMessage::YourTurn { deadline }) => {
-                        ui.your_turn = true;
-                        ui.status = format!("Your turn (deadline {deadline}).");
+                        if !spectating {
+                            ui.your_turn = true;
+                            ui.status = format!("Your turn (deadline {deadline}).");
+                        }
                     }
                     Ok(ServerMessage::TurnResult {
                         shot_at,

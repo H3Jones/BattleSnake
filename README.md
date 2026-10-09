@@ -34,6 +34,10 @@ To play the bot, tick "Play vs bot" on the web page or pass `--bot` to the TUI
 (e.g. `cargo run -p battlesnake-tui -- ws://127.0.0.1:7777/ws "" Alice --bot`).
 The bot takes player 2 (the longer snake) and is ready automatically.
 
+For bot vs bot, tick "Watch bot vs bot" on the web page or pass `--spectate` to
+the TUI. Both seats are bots; you watch player 1's view (your board plus its
+fog-of-war shots) and see both boards revealed at game over.
+
 ## Build and test
 
 ```sh

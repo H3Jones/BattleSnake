@@ -272,6 +272,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         room,
         name: _,
         vs_bot,
+        bot_vs_bot,
     }) = serde_json::from_str(&first)
     else {
         send_error(&tx, "First message must be Join");
@@ -303,7 +304,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             return;
         };
         room.clients[player] = Some(Client { tx: tx.clone() });
-        if vs_bot && player == 0 && room.clients[1].is_none() {
+        if bot_vs_bot && player == 0 && room.clients[1].is_none() {
+            // The joining client only spectates; both seats are bots.
+            let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
+            room.clients[1] = Some(Client { tx: bot_tx });
+            room.bots = [Some(Bot::default()), Some(Bot::default())];
+            room.ready[1] = true;
+        } else if vs_bot && player == 0 && room.clients[1].is_none() {
             // The bot's outbound channel is closed; messages to it are dropped.
             let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
             room.clients[1] = Some(Client { tx: bot_tx });
@@ -344,10 +351,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 }
             }
             ClientMessage::Turn { dir, target } => {
-                room_handle
-                    .lock()
-                    .await
-                    .apply(player, Turn { dir, target }, &state.config, false);
+                let mut room = room_handle.lock().await;
+                if room.bots[player].is_some() {
+                    room.send(
+                        player,
+                        &ServerMessage::Error {
+                            message: "Spectating: this seat is bot-controlled".into(),
+                        },
+                    );
+                } else {
+                    room.apply(player, Turn { dir, target }, &state.config, false);
+                }
             }
             ClientMessage::Resign => {
                 resign(&room_handle, player).await;

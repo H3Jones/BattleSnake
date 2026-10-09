@@ -5,7 +5,7 @@ const KEYS = {
   a: "left", arrowleft: "left", d: "right", arrowright: "right",
 };
 
-let ws, me = null, myTurn = false, dir = "right", target = null;
+let ws, me = null, myTurn = false, dir = "right", target = null, watching = false;
 let own = null, enemy = null, revealed = null;
 
 const ARROWS = { up: "^", down: "v", left: "<", right: ">" };
@@ -24,8 +24,9 @@ const same = (a, b) => a.x === b.x && a.y === b.y;
 
 $("join").addEventListener("submit", (e) => {
   e.preventDefault();
+  watching = $("spectate").checked;
   ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => send({ type: "join", room: $("room").value, name: $("name").value, vs_bot: $("bot").checked });
+  ws.onopen = () => send({ type: "join", room: $("room").value, name: $("name").value, vs_bot: $("bot").checked, bot_vs_bot: watching });
   ws.onclose = () => { status("Disconnected."); myTurn = false; };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 });
@@ -39,7 +40,7 @@ function handle(m) {
       me = m.player;
       $("join").hidden = true;
       $("controls").hidden = false;
-      status(`Room ${m.room}, you are player ${me + 1}. Press Ready.`);
+      status(`Room ${m.room}. ` + (watching ? "Watching bot vs bot (player 1's view). Press Ready to start." : `You are player ${me + 1}. Press Ready.`));
       break;
     case "start":
       own = m.your_board;
@@ -50,6 +51,7 @@ function handle(m) {
       status("Game started.");
       break;
     case "your_turn":
+      if (watching) break;
       myTurn = true;
       status(`Your turn (direction: ${dir}).`);
       break;

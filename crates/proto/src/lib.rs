@@ -9,6 +9,8 @@ pub enum ClientMessage {
         name: String,
         #[serde(default)]
         vs_bot: bool,
+        #[serde(default)]
+        bot_vs_bot: bool,
     },
     Ready,
     Turn {
