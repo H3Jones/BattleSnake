@@ -25,7 +25,7 @@ const same = (a, b) => a.x === b.x && a.y === b.y;
 $("join").addEventListener("submit", (e) => {
   e.preventDefault();
   ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => send({ type: "join", room: $("room").value, name: $("name").value });
+  ws.onopen = () => send({ type: "join", room: $("room").value, name: $("name").value, vs_bot: $("bot").checked });
   ws.onclose = () => { status("Disconnected."); myTurn = false; };
   ws.onmessage = (e) => handle(JSON.parse(e.data));
 });

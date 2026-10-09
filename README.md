@@ -26,6 +26,13 @@ server at `/` (open `http://127.0.0.1:7777`).
 `crates/core` has no IO and uses a seeded RNG for reproducible initial
 placement. `crates/proto` defines the serde wire messages. `crates/server`
 owns room state and exposes `/ws`; `crates/tui` is a basic interactive client.
+`crates/ai` is the bot: `Bot { movement: MovementBehaviour, shooting: ShootingBehaviour }`.
+Currently `Longest` (move toward the longest free line of sight) and `Random`
+(fire at a random unshot cell); add enum variants to introduce new modes.
+
+To play the bot, tick "Play vs bot" on the web page or pass `--bot` to the TUI
+(e.g. `cargo run -p battlesnake-tui -- ws://127.0.0.1:7777/ws "" Alice --bot`).
+The bot takes player 2 (the longer snake) and is ready automatically.
 
 ## Build and test
 

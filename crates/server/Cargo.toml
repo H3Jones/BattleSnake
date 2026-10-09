@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 axum = { version = "0.7", features = ["ws"] }
+battlesnake-ai = { path = "../ai" }
 battlesnake-core = { path = "../core" }
 battlesnake-proto = { path = "../proto" }
 futures-util = "0.3"

@@ -7,6 +7,8 @@ pub enum ClientMessage {
     Join {
         room: String,
         name: String,
+        #[serde(default)]
+        vs_bot: bool,
     },
     Ready,
     Turn {

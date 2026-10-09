@@ -7,6 +7,7 @@ use axum::{
     routing::get,
     Router,
 };
+use battlesnake_ai::Bot;
 use battlesnake_core::{apply_turn, Config, Event, GameState, Turn, Winner};
 use battlesnake_proto::{BoardView, ClientMessage, EnemyView, ServerMessage, ShotResult};
 use futures_util::{SinkExt, StreamExt};
@@ -20,8 +21,8 @@ use std::{
 };
 use tokio::{
     net::TcpListener,
-    sync::{mpsc, Mutex},
-    time::{sleep_until, Instant},
+    sync::{mpsc, Mutex, Notify},
+    time::{sleep, sleep_until, Duration, Instant},
 };
 
 #[derive(Clone)]
@@ -36,18 +37,22 @@ struct Client {
 
 struct Room {
     clients: [Option<Client>; 2],
+    bots: [Option<Bot>; 2],
     ready: [bool; 2],
     game: Option<GameState>,
     deadline: Option<Instant>,
+    wake: Arc<Notify>,
 }
 
 impl Room {
     fn new() -> Self {
         Self {
             clients: [None, None],
+            bots: [None, None],
             ready: [false, false],
             game: None,
             deadline: None,
+            wake: Arc::new(Notify::new()),
         }
     }
 
@@ -128,6 +133,7 @@ impl Room {
     }
 
     fn apply(&mut self, player: usize, turn: Turn, config: &Config, timed_out: bool) {
+        self.wake.notify_one();
         let Some(game) = &mut self.game else {
             self.send(
                 player,
@@ -262,7 +268,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     let Some(Ok(Message::Text(first))) = reader.next().await else {
         return;
     };
-    let Ok(ClientMessage::Join { room, name: _ }) = serde_json::from_str(&first) else {
+    let Ok(ClientMessage::Join {
+        room,
+        name: _,
+        vs_bot,
+    }) = serde_json::from_str(&first)
+    else {
         send_error(&tx, "First message must be Join");
         return;
     };
@@ -292,6 +303,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             return;
         };
         room.clients[player] = Some(Client { tx: tx.clone() });
+        if vs_bot && player == 0 && room.clients[1].is_none() {
+            // The bot's outbound channel is closed; messages to it are dropped.
+            let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
+            room.clients[1] = Some(Client { tx: bot_tx });
+            room.bots[1] = Some(Bot::default());
+            room.ready[1] = true;
+        }
         room.send(
             player,
             &ServerMessage::Joined {
@@ -348,7 +366,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 fn spawn_timeout(room: Arc<Mutex<Room>>, config: Config) {
     tokio::spawn(async move {
         loop {
-            let deadline = {
+            let (deadline, wake, bot_to_move) = {
                 let room = room.lock().await;
                 let Some(game) = &room.game else { return };
                 if game.winner.is_some() {
@@ -357,9 +375,28 @@ fn spawn_timeout(room: Arc<Mutex<Room>>, config: Config) {
                 let Some(deadline) = room.deadline else {
                     return;
                 };
-                deadline
+                (deadline, room.wake.clone(), room.bots[game.current_player])
             };
-            sleep_until(deadline).await;
+            if let Some(bot) = bot_to_move {
+                // Short pause so the bot's move doesn't feel instantaneous.
+                sleep(Duration::from_millis(700)).await;
+                let mut room = room.lock().await;
+                if room.deadline != Some(deadline) {
+                    continue;
+                }
+                let Some(game) = &room.game else { return };
+                if game.winner.is_some() {
+                    return;
+                }
+                let player = game.current_player;
+                let turn = bot.choose_turn(game, player, &mut thread_rng());
+                room.apply(player, turn, &config, false);
+                continue;
+            }
+            tokio::select! {
+                _ = sleep_until(deadline) => {}
+                _ = wake.notified() => continue,
+            }
             let mut room = room.lock().await;
             if room.deadline != Some(deadline) {
                 continue;
@@ -393,6 +430,7 @@ fn resign_locked(room: &mut Room, player: usize) {
     if game.winner.is_none() {
         game.winner = Some(Winner::Player(1 - player));
         room.deadline = None;
+        room.wake.notify_one();
         room.finish_if_game_over();
     }
 }

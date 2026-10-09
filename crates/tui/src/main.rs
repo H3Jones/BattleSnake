@@ -44,7 +44,10 @@ impl Default for Ui {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = std::env::args().skip(1);
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    let vs_bot = args.iter().any(|arg| arg == "--bot");
+    args.retain(|arg| arg != "--bot");
+    let mut args = args.into_iter();
     let address = args
         .next()
         .unwrap_or_else(|| "ws://127.0.0.1:7777/ws".to_owned());
@@ -54,7 +57,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (mut writer, mut reader) = socket.split();
     writer
         .send(Message::Text(
-            serde_json::to_string(&ClientMessage::Join { room, name })?.into(),
+            serde_json::to_string(&ClientMessage::Join { room, name, vs_bot })?.into(),
         ))
         .await?;
 
