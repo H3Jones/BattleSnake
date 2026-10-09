@@ -89,6 +89,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             x: your_board.width / 2,
                             y: your_board.height / 2,
                         };
+                        ui.direction = heading(&your_board).unwrap_or(ui.direction);
                         ui.your_board = Some(your_board);
                         ui.enemy_view = Some(enemy_view);
                         ui.status = "Game started.".into();
@@ -104,6 +105,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         your_board,
                     }) => {
                         ui.your_turn = false;
+                        ui.direction = heading(&your_board).unwrap_or(ui.direction);
                         ui.your_board = Some(your_board);
                         if let (Some(target), Some(outcome)) = (shot_at, outcome) {
                             if let Some(view) = &mut ui.enemy_view {
@@ -228,7 +230,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, ui: &Ui) {
     let own = ui
         .your_board
         .as_ref()
-        .map(|board| board_text(board, ui.target, true))
+        .map(|board| board_text(board, ui.target, false, ui.direction))
         .unwrap_or_else(|| "Waiting for both players to ready up.".into());
     let enemy = ui
         .enemy_view
@@ -259,7 +261,23 @@ fn draw(frame: &mut ratatui::Frame<'_>, ui: &Ui) {
     );
 }
 
-fn board_text(board: &BoardView, target: Coord, show_target: bool) -> String {
+fn heading(board: &BoardView) -> Option<Direction> {
+    let [head, neck, ..] = board.your_segments[..] else {
+        return None;
+    };
+    match (
+        i32::from(head.x) - i32::from(neck.x),
+        i32::from(head.y) - i32::from(neck.y),
+    ) {
+        (0, -1) => Some(Direction::Up),
+        (0, 1) => Some(Direction::Down),
+        (-1, 0) => Some(Direction::Left),
+        (1, 0) => Some(Direction::Right),
+        _ => None,
+    }
+}
+
+fn board_text(board: &BoardView, target: Coord, show_target: bool, direction: Direction) -> String {
     let mut rows = Vec::new();
     for y in 0..board.height {
         let mut row = String::new();
@@ -268,7 +286,12 @@ fn board_text(board: &BoardView, target: Coord, show_target: bool) -> String {
             let mark = if show_target && point == target {
                 '+'
             } else if board.your_segments.first() == Some(&point) {
-                '@'
+                match direction {
+                    Direction::Up => '^',
+                    Direction::Down => 'v',
+                    Direction::Left => '<',
+                    Direction::Right => '>',
+                }
             } else if board.your_segments.contains(&point) {
                 'o'
             } else if board.incoming_shots.contains(&point) {

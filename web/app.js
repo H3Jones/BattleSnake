@@ -8,6 +8,16 @@ const KEYS = {
 let ws, me = null, myTurn = false, dir = "right", target = null;
 let own = null, enemy = null, revealed = null;
 
+const ARROWS = { up: "^", down: "v", left: "<", right: ">" };
+
+// Default the selection to the snake's current heading (head minus neck).
+function syncDir() {
+  const [h, n] = own.your_segments;
+  if (!n) return;
+  const dx = h.x - n.x, dy = h.y - n.y;
+  dir = Object.keys(DIRS).find((k) => DIRS[k][0] === dx && DIRS[k][1] === dy) || dir;
+}
+
 const send = (msg) => ws && ws.send(JSON.stringify(msg));
 const status = (text) => ($("status").textContent = text);
 const same = (a, b) => a.x === b.x && a.y === b.y;
@@ -35,6 +45,7 @@ function handle(m) {
       own = m.your_board;
       enemy = m.enemy_view;
       revealed = null;
+      syncDir();
       target = { x: Math.floor(own.width / 2), y: Math.floor(own.height / 2) };
       status("Game started.");
       break;
@@ -45,6 +56,7 @@ function handle(m) {
     case "turn_result":
       myTurn = false;
       own = m.your_board;
+      syncDir();
       if (m.shot_at && m.outcome) {
         enemy.shots.push({ target: m.shot_at, outcome: m.outcome });
         status(m.outcome.result === "miss" ? "Miss." : `Hit! Severed ${m.outcome.length} segment(s).`);
@@ -84,7 +96,7 @@ function render() {
   if (!own) return;
   grid($("own"), own.width, own.height, (c, p) => {
     const i = own.your_segments.findIndex((s) => same(s, p));
-    if (i === 0) c.classList.add("head");
+    if (i === 0) { c.classList.add("head"); c.textContent = ARROWS[dir]; }
     else if (i > 0) c.classList.add("body");
     if (own.incoming_shots.some((s) => same(s, p))) { c.classList.add("shot"); c.textContent = "x"; }
   });
@@ -109,6 +121,7 @@ document.addEventListener("keydown", (e) => {
   if (KEYS[k]) {
     dir = KEYS[k];
     if (myTurn) status(`Your turn (direction: ${dir}).`);
+    render();
     e.preventDefault();
   } else if (myTurn && (e.key === "Enter" || e.key === " ")) {
     myTurn = false;
