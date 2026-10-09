@@ -47,6 +47,23 @@ pub enum ServerMessage {
     Error {
         message: String,
     },
+    /// Sent to a spectator instead of `Joined`; spectators have no seat.
+    Spectating {
+        room: String,
+    },
+    /// Full, unfogged view of both boards for spectators.
+    Spectate {
+        boards: [BoardView; 2],
+        current_player: usize,
+        last_shot: Option<SpectateShot>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpectateShot {
+    pub player: usize,
+    pub target: Coord,
+    pub outcome: ShotResult,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

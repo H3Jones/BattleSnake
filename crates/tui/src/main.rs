@@ -21,6 +21,7 @@ struct Ui {
     player: Option<usize>,
     your_board: Option<BoardView>,
     enemy_view: Option<EnemyView>,
+    spectate: Option<[BoardView; 2]>,
     direction: Direction,
     target: Coord,
     your_turn: bool,
@@ -34,6 +35,7 @@ impl Default for Ui {
             player: None,
             your_board: None,
             enemy_view: None,
+            spectate: None,
             direction: Direction::Right,
             target: Coord { x: 0, y: 0 },
             your_turn: false,
@@ -148,6 +150,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             reveal[1].len()
                         );
                     }
+                    Ok(ServerMessage::Spectating { room }) => {
+                        ui.status = format!("Room {room}. Watching bot vs bot. Press R to start.");
+                        ui.room = room;
+                    }
+                    Ok(ServerMessage::Spectate {
+                        boards,
+                        current_player,
+                        last_shot,
+                    }) => {
+                        let last = last_shot
+                            .map(|shot| {
+                                format!(" P{} {}", shot.player + 1, outcome_text(shot.outcome))
+                            })
+                            .unwrap_or_default();
+                        ui.status = format!("Player {} to move.{last}", current_player + 1);
+                        ui.spectate = Some(boards);
+                    }
                     Ok(ServerMessage::Error { message }) => {
                         if message.starts_with("Invalid turn:") {
                             ui.your_turn = true;
@@ -235,10 +254,32 @@ fn draw(frame: &mut ratatui::Frame<'_>, ui: &Ui) {
         .direction(LayoutDirection::Vertical)
         .constraints([Constraint::Min(5), Constraint::Length(3)])
         .split(frame.area());
-    let boards = Layout::default()
+    let boards_area = Layout::default()
         .direction(LayoutDirection::Horizontal)
         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
         .split(chunks[0]);
+    if let Some(boards) = &ui.spectate {
+        for (index, board) in boards.iter().enumerate() {
+            let direction = heading(board).unwrap_or(Direction::Right);
+            frame.render_widget(
+                Paragraph::new(board_text(board, ui.target, false, direction)).block(
+                    Block::default()
+                        .title(format!("Player {}", index + 1))
+                        .borders(Borders::ALL),
+                ),
+                boards_area[index],
+            );
+        }
+        frame.render_widget(
+            Paragraph::new(format!(
+                "Room: {} | {} | R start, Q quit",
+                ui.room, ui.status
+            ))
+            .block(Block::default().borders(Borders::ALL)),
+            chunks[1],
+        );
+        return;
+    }
     let own = ui
         .your_board
         .as_ref()
@@ -251,7 +292,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, ui: &Ui) {
         .unwrap_or_else(|| "Enemy board is hidden.".into());
     frame.render_widget(
         Paragraph::new(own).block(Block::default().title("Your board").borders(Borders::ALL)),
-        boards[0],
+        boards_area[0],
     );
     frame.render_widget(
         Paragraph::new(enemy).block(
@@ -259,7 +300,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, ui: &Ui) {
                 .title("Enemy fog of war")
                 .borders(Borders::ALL),
         ),
-        boards[1],
+        boards_area[1],
     );
     frame.render_widget(
         Paragraph::new(format!(

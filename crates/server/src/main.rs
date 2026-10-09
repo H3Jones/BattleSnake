@@ -9,7 +9,9 @@ use axum::{
 };
 use battlesnake_ai::Bot;
 use battlesnake_core::{apply_turn, Config, Event, GameState, Turn, Winner};
-use battlesnake_proto::{BoardView, ClientMessage, EnemyView, ServerMessage, ShotResult};
+use battlesnake_proto::{
+    BoardView, ClientMessage, EnemyView, ServerMessage, ShotResult, SpectateShot,
+};
 use futures_util::{SinkExt, StreamExt};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
@@ -37,6 +39,7 @@ struct Client {
 
 struct Room {
     clients: [Option<Client>; 2],
+    spectators: Vec<mpsc::UnboundedSender<Message>>,
     bots: [Option<Bot>; 2],
     ready: [bool; 2],
     game: Option<GameState>,
@@ -48,6 +51,7 @@ impl Room {
     fn new() -> Self {
         Self {
             clients: [None, None],
+            spectators: Vec::new(),
             bots: [None, None],
             ready: [false, false],
             game: None,
@@ -64,10 +68,29 @@ impl Room {
         }
     }
 
+    fn send_spectators(&self, message: &ServerMessage) {
+        if let Ok(json) = serde_json::to_string(message) {
+            for tx in &self.spectators {
+                let _ = tx.send(Message::Text(json.clone().into()));
+            }
+        }
+    }
+
+    fn spectate_update(&self, last_shot: Option<SpectateShot>) {
+        if let Some(game) = &self.game {
+            self.send_spectators(&ServerMessage::Spectate {
+                boards: [board_view(game, 0), board_view(game, 1)],
+                current_player: game.current_player,
+                last_shot,
+            });
+        }
+    }
+
     fn broadcast(&self, message: &ServerMessage) {
         for player in 0..2 {
             self.send(player, message);
         }
+        self.send_spectators(message);
     }
 
     fn begin_if_ready(&mut self, config: &Config) -> bool {
@@ -92,6 +115,7 @@ impl Room {
             );
         }
         self.game = Some(game);
+        self.spectate_update(None);
         self.set_next_deadline(config);
         self.notify_turn();
         true
@@ -177,6 +201,13 @@ impl Room {
         };
         match result {
             Ok((shot_at, shooter_outcome, head_hit, game_over, boards)) => {
+                self.spectate_update(shot_at.zip(shooter_outcome).map(|(target, outcome)| {
+                    SpectateShot {
+                        player,
+                        target,
+                        outcome,
+                    }
+                }));
                 if !head_hit {
                     for recipient in 0..2 {
                         self.send(
@@ -297,34 +328,47 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             .clone()
     };
 
-    let player = {
+    let seat: Option<usize> = {
         let mut room = room_handle.lock().await;
-        let Some(player) = room.clients.iter().position(Option::is_none) else {
-            send_error(&tx, "Room is full");
-            return;
-        };
-        room.clients[player] = Some(Client { tx: tx.clone() });
-        if bot_vs_bot && player == 0 && room.clients[1].is_none() {
-            // The joining client only spectates; both seats are bots.
-            let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
-            room.clients[1] = Some(Client { tx: bot_tx });
-            room.bots = [Some(Bot::default()), Some(Bot::default())];
-            room.ready[1] = true;
-        } else if vs_bot && player == 0 && room.clients[1].is_none() {
-            // The bot's outbound channel is closed; messages to it are dropped.
-            let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
-            room.clients[1] = Some(Client { tx: bot_tx });
-            room.bots[1] = Some(Bot::default());
-            room.ready[1] = true;
-        }
-        room.send(
-            player,
-            &ServerMessage::Joined {
+        if bot_vs_bot {
+            if room.clients.iter().any(Option::is_some) || !room.spectators.is_empty() {
+                send_error(&tx, "Room is in use");
+                return;
+            }
+            // Both seats are bots; the client only watches.
+            for seat in 0..2 {
+                let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
+                room.clients[seat] = Some(Client { tx: bot_tx });
+                room.bots[seat] = Some(Bot::default());
+                room.ready[seat] = true;
+            }
+            room.spectators.push(tx.clone());
+            room.send_spectators(&ServerMessage::Spectating {
                 room: room_code.clone(),
+            });
+            None
+        } else {
+            let Some(player) = room.clients.iter().position(Option::is_none) else {
+                send_error(&tx, "Room is full");
+                return;
+            };
+            room.clients[player] = Some(Client { tx: tx.clone() });
+            if vs_bot && player == 0 && room.clients[1].is_none() {
+                // The bot's outbound channel is closed; messages to it are dropped.
+                let (bot_tx, _) = mpsc::unbounded_channel::<Message>();
+                room.clients[1] = Some(Client { tx: bot_tx });
+                room.bots[1] = Some(Bot::default());
+                room.ready[1] = true;
+            }
+            room.send(
                 player,
-            },
-        );
-        player
+                &ServerMessage::Joined {
+                    room: room_code.clone(),
+                    player,
+                },
+            );
+            Some(player)
+        }
     };
 
     loop {
@@ -343,7 +387,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             ClientMessage::Ready => {
                 let started = {
                     let mut room = room_handle.lock().await;
-                    room.ready[player] = true;
+                    if let Some(player) = seat {
+                        room.ready[player] = true;
+                    }
                     room.begin_if_ready(&state.config)
                 };
                 if started {
@@ -351,30 +397,37 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 }
             }
             ClientMessage::Turn { dir, target } => {
-                let mut room = room_handle.lock().await;
-                if room.bots[player].is_some() {
-                    room.send(
-                        player,
-                        &ServerMessage::Error {
-                            message: "Spectating: this seat is bot-controlled".into(),
-                        },
-                    );
-                } else {
-                    room.apply(player, Turn { dir, target }, &state.config, false);
-                }
+                let Some(player) = seat else {
+                    send_error(&tx, "Spectators cannot play");
+                    continue;
+                };
+                room_handle
+                    .lock()
+                    .await
+                    .apply(player, Turn { dir, target }, &state.config, false);
             }
-            ClientMessage::Resign => {
-                resign(&room_handle, player).await;
-                break;
-            }
+            ClientMessage::Resign => break,
         }
     }
 
     let mut room = room_handle.lock().await;
-    if room.game.as_ref().is_some_and(|game| game.winner.is_none()) {
-        resign_locked(&mut room, player);
+    match seat {
+        Some(player) => {
+            if room.game.as_ref().is_some_and(|game| game.winner.is_none()) {
+                resign_locked(&mut room, player);
+            }
+            room.clients[player] = None;
+        }
+        None => {
+            // Stop the bots when the spectator leaves.
+            if room.game.as_ref().is_some_and(|game| game.winner.is_none()) {
+                resign_locked(&mut room, 0);
+            }
+            room.spectators.retain(|s| !s.same_channel(&tx));
+            room.clients = [None, None];
+            room.bots = [None, None];
+        }
     }
-    room.clients[player] = None;
 }
 
 fn spawn_timeout(room: Arc<Mutex<Room>>, config: Config) {
@@ -432,11 +485,6 @@ fn spawn_timeout(room: Arc<Mutex<Room>>, config: Config) {
             );
         }
     });
-}
-
-async fn resign(handle: &Arc<Mutex<Room>>, player: usize) {
-    let mut room = handle.lock().await;
-    resign_locked(&mut room, player);
 }
 
 fn resign_locked(room: &mut Room, player: usize) {

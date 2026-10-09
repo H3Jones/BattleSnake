@@ -6,7 +6,7 @@ const KEYS = {
 };
 
 let ws, me = null, myTurn = false, dir = "right", target = null, watching = false;
-let own = null, enemy = null, revealed = null;
+let own = null, enemy = null, revealed = null, spec = null;
 
 const ARROWS = { up: "^", down: "v", left: "<", right: ">" };
 
@@ -40,7 +40,7 @@ function handle(m) {
       me = m.player;
       $("join").hidden = true;
       $("controls").hidden = false;
-      status(`Room ${m.room}. ` + (watching ? "Watching bot vs bot (player 1's view). Press Ready to start." : `You are player ${me + 1}. Press Ready.`));
+      status(`Room ${m.room}. You are player ${me + 1}. Press Ready.`);
       break;
     case "start":
       own = m.your_board;
@@ -66,8 +66,25 @@ function handle(m) {
         status(m.timed_out ? "Turn timed out." : "Opponent moved.");
       }
       break;
+    case "spectating":
+      watching = true;
+      $("join").hidden = true;
+      $("controls").hidden = false;
+      $("resign").hidden = true;
+      status(`Room ${m.room}. Watching bot vs bot. Press Ready to start.`);
+      break;
+    case "spectate": {
+      spec = m;
+      const who = m.last_shot ? `P${m.last_shot.player + 1} ` + (m.last_shot.outcome.result === "miss" ? "missed." : `severed ${m.last_shot.outcome.length}.`) : "";
+      status(`Player ${m.current_player + 1} to move. ${who}`);
+      break;
+    }
     case "game_over":
       myTurn = false;
+      if (watching) {
+        status(`Game over: player ${m.winner + 1} wins.`);
+        break;
+      }
       own.your_segments = m.reveal[me];
       revealed = m.reveal[1 - me];
       status(m.winner === me ? "You win!" : "You lose.");
@@ -94,14 +111,33 @@ function grid(el, w, h, cellFn, onClick) {
   }
 }
 
-function render() {
-  if (!own) return;
-  grid($("own"), own.width, own.height, (c, p) => {
-    const i = own.your_segments.findIndex((s) => same(s, p));
-    if (i === 0) { c.classList.add("head"); c.textContent = ARROWS[dir]; }
+function headingOf(segs) {
+  const [h, n] = segs;
+  if (!n) return null;
+  const dx = h.x - n.x, dy = h.y - n.y;
+  return Object.keys(DIRS).find((k) => DIRS[k][0] === dx && DIRS[k][1] === dy) || null;
+}
+
+function drawFull(el, board, arrowDir) {
+  grid(el, board.width, board.height, (c, p) => {
+    const i = board.your_segments.findIndex((s) => same(s, p));
+    if (i === 0) { c.classList.add("head"); c.textContent = ARROWS[arrowDir] || ""; }
     else if (i > 0) c.classList.add("body");
-    if (own.incoming_shots.some((s) => same(s, p))) { c.classList.add("shot"); c.textContent = "x"; }
+    if (board.incoming_shots.some((s) => same(s, p))) { c.classList.add("shot"); if (i < 0) c.textContent = "x"; }
   });
+}
+
+function render() {
+  if (watching) {
+    if (!spec) return;
+    document.querySelectorAll("h2")[0].textContent = "Player 1";
+    document.querySelectorAll("h2")[1].textContent = "Player 2";
+    drawFull($("own"), spec.boards[0], headingOf(spec.boards[0].your_segments));
+    drawFull($("enemy"), spec.boards[1], headingOf(spec.boards[1].your_segments));
+    return;
+  }
+  if (!own) return;
+  drawFull($("own"), own, dir);
   grid($("enemy"), enemy.width, enemy.height, (c, p) => {
     const shot = enemy.shots.find((s) => same(s.target, p));
     if (shot) {
