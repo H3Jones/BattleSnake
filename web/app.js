@@ -7,6 +7,9 @@ const KEYS = {
 
 let ws, me = null, myTurn = false, dir = "right", target = null, watching = false;
 let own = null, enemy = null, revealed = null, spec = null;
+const SHOT_FADE_TURNS = 5;
+let tick = 0;
+const shotSeen = new Map();
 
 const ARROWS = { up: "^", down: "v", left: "<", right: ">" };
 
@@ -44,6 +47,8 @@ function handle(m) {
       break;
     case "start":
       own = m.your_board;
+      shotSeen.clear();
+      tick = 0;
       enemy = m.enemy_view;
       revealed = null;
       syncDir();
@@ -58,6 +63,8 @@ function handle(m) {
     case "turn_result":
       myTurn = false;
       own = m.your_board;
+      tick++;
+      noteShots("own", own);
       syncDir();
       if (m.shot_at && m.outcome) {
         enemy.shots.push({ target: m.shot_at, outcome: m.outcome });
@@ -68,6 +75,8 @@ function handle(m) {
       break;
     case "spectating":
       watching = true;
+      shotSeen.clear();
+      tick = 0;
       $("join").hidden = true;
       $("controls").hidden = false;
       $("resign").hidden = true;
@@ -75,6 +84,9 @@ function handle(m) {
       break;
     case "spectate": {
       spec = m;
+      tick++;
+      noteShots(0, m.boards[0]);
+      noteShots(1, m.boards[1]);
       const who = m.last_shot ? `P${m.last_shot.player + 1} ` + (m.last_shot.outcome.result === "miss" ? "missed." : `severed ${m.last_shot.outcome.length}.`) : "";
       status(`Player ${m.current_player + 1} to move. ${who}`);
       break;
@@ -118,13 +130,28 @@ function headingOf(segs) {
   return Object.keys(DIRS).find((k) => DIRS[k][0] === dx && DIRS[k][1] === dy) || null;
 }
 
-function drawFull(el, board, arrowDir) {
+function drawFull(el, board, arrowDir, key) {
   grid(el, board.width, board.height, (c, p) => {
     const i = board.your_segments.findIndex((s) => same(s, p));
     if (i === 0) { c.classList.add("head"); c.textContent = ARROWS[arrowDir] || ""; }
     else if (i > 0) c.classList.add("body");
-    if (board.incoming_shots.some((s) => same(s, p))) { c.classList.add("shot"); if (i < 0) c.textContent = "x"; }
+    if (i < 0 && board.incoming_shots.some((s) => same(s, p))) {
+      const age = tick - (shotSeen.get(`${key}:${p.x},${p.y}`) ?? tick);
+      if (age < SHOT_FADE_TURNS) {
+        c.classList.add("shot");
+        c.style.opacity = 1 - age / SHOT_FADE_TURNS;
+        c.textContent = "x";
+      }
+    }
   });
+}
+
+// Record when each incoming shot was first seen; a tick is one server update.
+function noteShots(key, board) {
+  for (const s of board.incoming_shots) {
+    const k = `${key}:${s.x},${s.y}`;
+    if (!shotSeen.has(k)) shotSeen.set(k, tick);
+  }
 }
 
 function render() {
@@ -132,12 +159,12 @@ function render() {
     if (!spec) return;
     document.querySelectorAll("h2")[0].textContent = "Player 1";
     document.querySelectorAll("h2")[1].textContent = "Player 2";
-    drawFull($("own"), spec.boards[0], headingOf(spec.boards[0].your_segments));
-    drawFull($("enemy"), spec.boards[1], headingOf(spec.boards[1].your_segments));
+    drawFull($("own"), spec.boards[0], headingOf(spec.boards[0].your_segments), 0);
+    drawFull($("enemy"), spec.boards[1], headingOf(spec.boards[1].your_segments), 1);
     return;
   }
   if (!own) return;
-  drawFull($("own"), own, dir);
+  drawFull($("own"), own, dir, "own");
   grid($("enemy"), enemy.width, enemy.height, (c, p) => {
     const shot = enemy.shots.find((s) => same(s.target, p));
     if (shot) {
